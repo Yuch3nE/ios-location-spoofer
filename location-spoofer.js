@@ -495,11 +495,16 @@
     if (!Number.isFinite(cfg.randomizeRadius) || cfg.randomizeRadius < 0) {
       cfg.randomizeRadius = 0;
     }
+    if (!Number.isFinite(cfg.latitude) || cfg.latitude < -90 || cfg.latitude > 90) {
+      throw new Error("invalid latitude");
+    }
+    if (!Number.isFinite(cfg.longitude) || cfg.longitude < -180 || cfg.longitude > 180) {
+      throw new Error("invalid longitude");
+    }
     return cfg;
   }
 
   function patchLocation(locationPayload, config) {
-    patchAppleWLocPayload
     var parts = [];
     var fields = locationPayload.length ? parseFields(locationPayload) : [];
     for (var i = 0; i < fields.length; i += 1) {
@@ -900,7 +905,8 @@
       "dumpRaw",
       "dumpHeaders",
       "prepareHeaders",
-      "rawLimit"
+      "rawLimit",
+      "randomizeRadius"
     ];
 
     if (args.config) {
@@ -1317,6 +1323,7 @@
           }
           if (config.debug) {
             console.log("Location spoofer response body: " + responseBody.length + " bytes, head=" + hexPreview(responseBody, 32));
+            console.log("Location spoofer randomizeRadius: " + config.randomizeRadius);
           }
           logHttpDump("response-original", $response, config);
           logRawDump("response-original", responseBody, config);
@@ -1380,6 +1387,28 @@
         var requestResult = spoofArpcRequest(requestBody, config);
         if (config.debug) {
           console.log("Location spoofer request synthetic response: patched " + requestResult.wifiCount + " wifi devices, " + requestResult.cellCount + " cell towers, response=" + requestResult.response.length + " bytes");
+          // 添加随机化调试信息
+          if (config.randomizeRadius > 0) {
+            console.log("Location spoofer randomization enabled: radius=" + config.randomizeRadius + "m");
+            console.log("Location spoofer base coordinates: " + config.latitude.toFixed(8) + "," + config.longitude.toFixed(8));
+          }
+
+          console.log("Location spoofer patched locations: " + patchedPayloadSummary(requestResult.payload));
+
+          // 添加样本坐标显示
+          try {
+            var patchedFields = parseFields(requestResult.payload);
+            var firstWifiField = firstFieldByNumber(patchedFields, 2);
+            if (firstWifiField && firstWifiField.wireType === 2) {
+              var wifiFields = parseFields(firstWifiField.valueBytes);
+              var wifiLocation = firstFieldByNumber(wifiFields, 2);
+              if (wifiLocation) {
+                console.log("Location spoofer sample randomized coord (first wifi): " + locationSummary(wifiLocation.valueBytes));
+              }
+            }
+          } catch (err) {
+            // 忽略解析错误
+          }
           console.log("Location spoofer patched locations: " + patchedPayloadSummary(requestResult.payload));
         }
         logRawDump("request-synthetic-response", requestResult.response, config);
