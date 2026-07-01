@@ -25,7 +25,9 @@
     dumpRaw: false,
     dumpHeaders: false,
     prepareHeaders: false,
-    rawLimit: 0
+    rawLimit: 0,
+    // 新增：坐标随机化半径（米），0 表示不随机
+    randomizeRadius: 20
   };
 
   // Prefix prepended to a SPOOFED (synthesized) response. Mirrors the original Go
@@ -47,6 +49,51 @@
     11: true,
     12: true
   };
+
+  /**
+   * 在指定坐标周围随机生成新坐标
+   * @param {number} lat - 原始纬度
+   * @param {number} lon - 原始经度
+   * @param {number} radiusMeters - 随机半径（米）
+   * @returns {{latitude: number, longitude: number}}
+   */
+  function randomizeCoordinates(lat, lon, radiusMeters) {
+    // 地球半径（米）
+    var EARTH_RADIUS = 6371000;
+
+    // 随机角度和距离
+    var angle = Math.random() * 2 * Math.PI;
+    var distance = Math.random() * radiusMeters;
+
+    // 转换为弧度
+    var latRad = lat * Math.PI / 180;
+    var lonRad = lon * Math.PI / 180;
+
+    // 计算新坐标
+    var angularDistance = distance / EARTH_RADIUS;
+
+    var newLatRad = Math.asin(
+      Math.sin(latRad) * Math.cos(angularDistance) +
+      Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(angle)
+    );
+
+    var newLonRad = lonRad + Math.atan2(
+      Math.sin(angle) * Math.sin(angularDistance) * Math.cos(latRad),
+      Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(newLatRad)
+    );
+
+    // 转换回度数
+    var newLat = newLatRad * 180 / Math.PI;
+    var newLon = newLonRad * 180 / Math.PI;
+
+    // 确保经度在 -180 到 180 范围内
+    newLon = ((newLon + 180) % 360 + 360) % 360 - 180;
+
+    return {
+      latitude: newLat,
+      longitude: newLon
+    };
+  }
 
   function bytesFromArray(values) {
     return new Uint8Array(values);
@@ -446,6 +493,17 @@
     cfg.rawLimit = Math.trunc(Number(cfg.rawLimit || 0));
     if (!Number.isFinite(cfg.rawLimit) || cfg.rawLimit < 0) {
       cfg.rawLimit = 0;
+    }
+
+    if (!Number.isFinite(cfg.latitude) || cfg.latitude < -90 || cfg.latitude > 90) {
+      throw new Error("invalid latitude");
+    }
+    if (!Number.isFinite(cfg.longitude) || cfg.longitude < -180 || cfg.longitude > 180) {
+      throw new Error("invalid longitude");
+    }
+    cfg.randomizeRadius = Math.max(0, Math.trunc(Number(cfg.randomizeRadius || 0)));
+    if (!Number.isFinite(cfg.randomizeRadius) || cfg.randomizeRadius < 0) {
+      cfg.randomizeRadius = 0;
     }
 
     if (!Number.isFinite(cfg.latitude) || cfg.latitude < -90 || cfg.latitude > 90) {
