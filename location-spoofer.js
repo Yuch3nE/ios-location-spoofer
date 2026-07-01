@@ -491,31 +491,15 @@
     cfg.dumpHeaders = cfg.dumpHeaders === true || String(cfg.dumpHeaders).toLowerCase() === "true";
     cfg.prepareHeaders = cfg.prepareHeaders === true || String(cfg.prepareHeaders).toLowerCase() === "true";
     cfg.rawLimit = Math.trunc(Number(cfg.rawLimit || 0));
-    if (!Number.isFinite(cfg.rawLimit) || cfg.rawLimit < 0) {
-      cfg.rawLimit = 0;
-    }
-
-    if (!Number.isFinite(cfg.latitude) || cfg.latitude < -90 || cfg.latitude > 90) {
-      throw new Error("invalid latitude");
-    }
-    if (!Number.isFinite(cfg.longitude) || cfg.longitude < -180 || cfg.longitude > 180) {
-      throw new Error("invalid longitude");
-    }
     cfg.randomizeRadius = Math.max(0, Math.trunc(Number(cfg.randomizeRadius || 0)));
     if (!Number.isFinite(cfg.randomizeRadius) || cfg.randomizeRadius < 0) {
       cfg.randomizeRadius = 0;
-    }
-
-    if (!Number.isFinite(cfg.latitude) || cfg.latitude < -90 || cfg.latitude > 90) {
-      throw new Error("invalid latitude");
-    }
-    if (!Number.isFinite(cfg.longitude) || cfg.longitude < -180 || cfg.longitude > 180) {
-      throw new Error("invalid longitude");
     }
     return cfg;
   }
 
   function patchLocation(locationPayload, config) {
+    patchAppleWLocPayload
     var parts = [];
     var fields = locationPayload.length ? parseFields(locationPayload) : [];
     for (var i = 0; i < fields.length; i += 1) {
@@ -524,8 +508,22 @@
       }
     }
 
-    parts.push(makeVarintField(1, coordToInt(config.latitude)));
-    parts.push(makeVarintField(2, coordToInt(config.longitude)));
+    // 根据配置决定是否随机化坐标
+    var finalLatitude = config.latitude;
+    var finalLongitude = config.longitude;
+
+    if (config.randomizeRadius > 0) {
+      var randomized = randomizeCoordinates(
+        config.latitude,
+        config.longitude,
+        config.randomizeRadius
+      );
+      finalLatitude = randomized.latitude;
+      finalLongitude = randomized.longitude;
+    }
+
+    parts.push(makeVarintField(1, coordToInt(finalLatitude)));
+    parts.push(makeVarintField(2, coordToInt(finalLongitude)));
     parts.push(makeVarintField(3, config.horizontalAccuracy));
     parts.push(makeVarintField(4, config.unknownValue4));
     parts.push(makeVarintField(5, config.altitude));
@@ -1325,7 +1323,26 @@
           var responseResult = spoofAppleResponse(responseBody, config);
           if (config.debug) {
             console.log("Location spoofer patched " + responseResult.wifiCount + " wifi devices, " + responseResult.cellCount + " cell towers, kind=" + responseResult.kind + ", prefix=" + (responseResult.prefix || "<none>") + ", response=" + responseResult.response.length + " bytes");
+            // 新增：随机化调试信息
+            if (config.randomizeRadius > 0) {
+              console.log("Location spoofer randomization enabled: radius=" + config.randomizeRadius + "m");
+              console.log("Location spoofer base coordinates: " + config.latitude.toFixed(8) + "," + config.longitude.toFixed(8));
+            }
             console.log("Location spoofer patched locations: " + patchedPayloadSummary(responseResult.payload));
+            // 新增：显示第一次随机化后的坐标（通过解析 patched payload）
+            try {
+              var patchedFields = parseFields(responseResult.payload);
+              var firstWifiField = firstFieldByNumber(patchedFields, 2);
+              if (firstWifiField && firstWifiField.wireType === 2) {
+                var wifiFields = parseFields(firstWifiField.valueBytes);
+                var wifiLocation = firstFieldByNumber(wifiFields, 2);
+                if (wifiLocation) {
+                  console.log("Location spoofer sample randomized coord (first wifi): " + locationSummary(wifiLocation.valueBytes));
+                }
+              }
+            } catch (err) {
+              // 忽略解析错误
+            }
           }
           logRawDump("response-patched", responseResult.response, config);
           doneRewriteResponse(responseResult.response, {
